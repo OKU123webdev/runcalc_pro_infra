@@ -1,0 +1,42 @@
+- name: Provision SSH key and Security Groups for Staging EC2 Instance
+  hosts: localhost
+  connection: local
+  tasks:
+
+  - name: Delete EC2 Key if it exists
+    ec2_key:
+      name: "flask_running_app_staging_key"
+      region: us-east-1
+      state: absent
+
+  - name: Create EC2 SSH key
+    ec2_key:
+      name: "flask_running_app_staging_key"
+      region: us-east-1
+    register: ec2_key
+
+  - name: Save EC2 SSH key to file
+    copy:
+      content: "{{ ec2_key.key.private_key }}"
+      dest: flask_running_app_staging_key.pem
+      mode: 0600
+
+
+  - name: Create Security Group for app instance
+    ec2_group:
+      name: "flask_running_app_staging_sg"
+      description: EC2 VPC Security Group for App Servers
+      region: us-east-1
+      rules:
+      - proto: tcp
+        ports: 80
+        cidr_ip: 0.0.0.0/0
+        rule_desc: Allow app access to nginx from anywhere
+      - proto: tcp
+        ports: 8080
+        cidr_ip: 0.0.0.0/0
+        rule_desc: Allow direct app access from anywhere
+      - proto: tcp
+        ports: 22
+        cidr_ip: 0.0.0.0/0
+        rule_desc: Allow SSH from anywhere

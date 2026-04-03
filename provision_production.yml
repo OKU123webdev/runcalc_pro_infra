@@ -1,0 +1,151 @@
+- name: Stage 1 - Launch Staging EC2 Instance
+  hosts: localhost
+  connection: local
+  # variables to be used in the playbook - making it easier to change values
+  vars:
+    instance_name: Flask_Running_App_Staging
+    key_name: flask_running_app_staging_key
+    instance_type: t2.small
+    security_group: flask_running_app_staging_sg
+    image_id: ami-0866a3c8686eaeeba
+    region: us-east-1
+    ansible_ssh_private_key_file: flask_running_app_staging_key.pem
+
+  tasks:
+    - name: Launch T2 small instance on EC2
+      ec2_instance:
+        name: "{{ instance_name }}"
+        key_name: "{{ key_name }}"
+        instance_type: "{{ instance_type }}"
+        security_group: "{{ security_group }}"
+        image_id: "{{ image_id }}"
+        region: "{{ region }}"
+        state: started
+        wait: yes
+      register: flask_running_app_staging_instance
+
+    - name: Add new instance to host group via its public IP address
+      add_host:
+        hostname: "{{ flask_running_app_staging_instance.instances[0].public_ip_address }}"
+        groupname: ec2_staging
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ flask_running_app_staging_instance.instances[0].public_ip_address }}"
+        port: 22
+        delay: 20
+        timeout: 320
+        state: started
+
+- name: Stage 2 - Install DuckDNS and Docker on the Staging EC2 Instance
+  hosts: ec2_staging
+  vars:
+    ansible_ssh_private_key_file: flask_running_app_staging_key.pem
+    remote_ec2_user: ubuntu
+    # your DuckDNS subdomain (without the .duckdns.org part)
+    duckdns_domain: <PLACEHOLDER - REPLACE WITH YOUR CHOSEN SUBDOMAIN>
+  remote_user: "{{ remote_ec2_user }}"
+  become: yes
+  become_method: sudo
+
+  vars_prompt:
+    - name: duckdns_api_token
+      prompt: "Enter the DuckDNS API token"
+      private: yes
+
+  tasks:
+    # --------- Setup DuckDNS on the staging instance ---------
+    # Setup duckdns client to update the public IP address of the staging instance with the duckdns service
+    - name: Ensure curl is installed
+      become: yes
+      package:
+        name: curl
+        state: present
+
+    - name: Create duckdns directory
+      file:
+        path: "~/duckdns"
+        state: directory
+        mode: '0755'
+
+    - name: Create the duck.sh script
+      copy:
+        dest: "~/duckdns/duck.sh"
+        mode: '0700'
+        content: |
+          #!/bin/bash
+          echo url="https://www.duckdns.org/update?domains={{ duckdns_domain }}&token={{ duckdns_api_token }}&ip=" | curl -k -o ~/duckdns/duck.log -K -
+
+    - name: Create the cron job to run every 5 minutes
+      cron:
+        name: "DuckDNS Update"
+        minute: "*/5"
+        job: "~/duckdns/duck.sh >/dev/null 2>&1"
+
+    - name: Run the script for the first time
+      command: "~/duckdns/duck.sh"
+      changed_when: true
+
+    - name: Read the duck.log file
+      slurp:
+        src: "~/duckdns/duck.log"
+      register: duck_log_content
+
+    - name: Display the DuckDNS log result
+      debug:
+        msg: "DuckDNS response: {{ duck_log_content['content'] | b64decode }}"
+
+    # --------- Install Docker on the staging instance ---------
+    - name: Add the Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Update apt packages and install docker-ce
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ remote_ec2_user }}"
+        groups: docker
+        append: yes
+
+- name: Stage 3 - Verify DuckDNS resolution from Localhost
+  hosts: localhost
+  connection: local
+  vars:
+    duckdns_domain: b01663625-staging
+
+  tasks:
+    - name: Get the EC2 IP from the previous stage
+      set_fact:
+        ec2_ip: "{{ flask_running_app_staging_instance.instances[0].public_ip_address }}"
+
+    - name: Check what IP DuckDNS is pointing to
+      # This waits until the DNS matches the EC2 IP
+      shell: "dig +short {{ duckdns_domain }}.duckdns.org"
+      register: dns_ip
+      until: dns_ip.stdout == ec2_ip
+      retries: 10
+      delay: 10
+      changed_when: false
+
+    - name: Final Result
+      debug:
+        msg: "Success! {{ duckdns_domain }}.duckdns.org is now pointing to {{ ec2_ip }}"
+

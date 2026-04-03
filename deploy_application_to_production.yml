@@ -1,0 +1,73 @@
+- name: Ensure staging instances are running and inventory is updated
+  hosts: localhost
+  gather_facts: no
+  vars:
+    instance_name: Flask_Running_App_Staging
+    region: us-east-1
+    group: ec2_staging
+
+  tasks:
+    - name: Gather facts to check if the staging instance already exists
+      ec2_instance_info:
+        region: "{{ region }}"
+        filters:
+          instance-state-name: running
+          tag:Name: "{{ instance_name }}"
+      register: ec2_exists
+
+    - name: Fail if no running instances are found
+      fail:
+        msg: "No running staging instances found. Please provision the staging environment."
+      when: ec2_exists.instances | length == 0
+
+    - name: Update inventory with dynamic public IPs
+      add_host:
+        name: "{{ item.public_ip_address }}"
+        groups: "{{ group }}"
+      loop: "{{ ec2_exists.instances }}"
+      when: item.public_ip_address is defined
+
+- name: Deploy Application on Staging Instance
+  vars:
+    ansible_ssh_private_key_file: flask_running_app_staging_key.pem
+    remote_ec2_user: ubuntu
+    group: ec2_staging
+  hosts: "{{ group }}"
+  remote_user: "{{ remote_ec2_user }}"
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: Tear down existing docker-compose app
+      community.docker.docker_compose_v2:
+        project_src: /home/ubuntu
+        state: absent
+      ignore_errors: yes
+
+    - name: Prune everything on docker
+      community.docker.docker_prune:
+        containers: true
+        images: true
+        networks: true
+        volumes: true
+        builder_cache: true
+
+    - name: Copy docker-compose file from the parent directory
+      copy:
+        src: ../docker-compose-staging.yml
+        dest: /home/ubuntu/docker-compose-staging.yml
+        mode: '0644'
+
+    - name: Copy nginx config file
+      copy:
+        src: ../nginx/
+        dest: /home/ubuntu/nginx/
+        mode: '0644'
+
+    - name: Start docker compose app
+      community.docker.docker_compose_v2:
+        project_src: /home/ubuntu
+        files:
+          - docker-compose-staging.yml
+        state: present
+        build: never
