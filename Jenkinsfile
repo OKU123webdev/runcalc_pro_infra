@@ -54,13 +54,8 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 sh '''
-                    PUBLIC_IP=$(aws ec2 describe-instances \
-                      --filters "Name=tag:Name,Values=RunCalc_Prod" "Name=instance-state-name,Values=running" \
-                      --query "Reservations[0].Instances[0].PublicIpAddress" \
-                      --output text)
-
-                    echo "Testing deployment on http://${PUBLIC_IP}"
-                    curl --fail http://${PUBLIC_IP}
+                    echo "Testing deployment via DuckDNS"
+                    curl --fail http://b01663625-staging.duckdns.org
                 '''
             }
         }
