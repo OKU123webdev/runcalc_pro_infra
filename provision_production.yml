@@ -1,15 +1,13 @@
 - name: Stage 1 - Launch Staging EC2 Instance
   hosts: localhost
   connection: local
-  # variables to be used in the playbook - making it easier to change values
   vars:
-    instance_name: Flask_Running_App_Staging
-    key_name: flask_running_app_staging_key
+    instance_name: RunCalc_Prod
+    key_name: runcalc_prod_key
     instance_type: t2.small
-    security_group: flask_running_app_staging_sg
+    security_group: runcalc_prod_sg
     image_id: ami-0866a3c8686eaeeba
     region: us-east-1
-    ansible_ssh_private_key_file: flask_running_app_staging_key.pem
 
   tasks:
     - name: Launch T2 small instance on EC2
@@ -41,24 +39,14 @@
 - name: Stage 2 - Install DuckDNS and Docker on the Staging EC2 Instance
   hosts: ec2_staging
   vars:
-    ansible_ssh_private_key_file: flask_running_app_staging_key.pem
     remote_ec2_user: ubuntu
-    # your DuckDNS subdomain (without the .duckdns.org part)
-    duckdns_domain: <PLACEHOLDER - REPLACE WITH YOUR CHOSEN SUBDOMAIN>
+    duckdns_domain: b01663625-staging
   remote_user: "{{ remote_ec2_user }}"
   become: yes
   become_method: sudo
 
-  vars_prompt:
-    - name: duckdns_api_token
-      prompt: "Enter the DuckDNS API token"
-      private: yes
-
   tasks:
-    # --------- Setup DuckDNS on the staging instance ---------
-    # Setup duckdns client to update the public IP address of the staging instance with the duckdns service
     - name: Ensure curl is installed
-      become: yes
       package:
         name: curl
         state: present
@@ -96,7 +84,6 @@
       debug:
         msg: "DuckDNS response: {{ duck_log_content['content'] | b64decode }}"
 
-    # --------- Install Docker on the staging instance ---------
     - name: Add the Docker GPG key
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
@@ -137,7 +124,6 @@
         ec2_ip: "{{ flask_running_app_staging_instance.instances[0].public_ip_address }}"
 
     - name: Check what IP DuckDNS is pointing to
-      # This waits until the DNS matches the EC2 IP
       shell: "dig +short {{ duckdns_domain }}.duckdns.org"
       register: dns_ip
       until: dns_ip.stdout == ec2_ip
@@ -148,4 +134,3 @@
     - name: Final Result
       debug:
         msg: "Success! {{ duckdns_domain }}.duckdns.org is now pointing to {{ ec2_ip }}"
-
