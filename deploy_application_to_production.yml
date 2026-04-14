@@ -1,13 +1,13 @@
-- name: Ensure staging instances are running and inventory is updated
+- name: Ensure production instance is running and inventory is updated
   hosts: localhost
   gather_facts: no
   vars:
-    instance_name: Flask_Running_App_Staging
+    instance_name: RunCalc_Prod
     region: us-east-1
     group: ec2_staging
 
   tasks:
-    - name: Gather facts to check if the staging instance already exists
+    - name: Gather facts to check if the production instance already exists
       ec2_instance_info:
         region: "{{ region }}"
         filters:
@@ -17,7 +17,7 @@
 
     - name: Fail if no running instances are found
       fail:
-        msg: "No running staging instances found. Please provision the staging environment."
+        msg: "No running production instances found."
       when: ec2_exists.instances | length == 0
 
     - name: Update inventory with dynamic public IPs
@@ -27,47 +27,24 @@
       loop: "{{ ec2_exists.instances }}"
       when: item.public_ip_address is defined
 
-- name: Deploy Application on Staging Instance
+- name: Deploy Application on Production Instance
   vars:
-    ansible_ssh_private_key_file: flask_running_app_staging_key.pem
     remote_ec2_user: ubuntu
     group: ec2_staging
+    image_name: oku123xx/runcalc-pro
   hosts: "{{ group }}"
   remote_user: "{{ remote_ec2_user }}"
   become: yes
-  become_method: sudo
 
   tasks:
-    - name: Tear down existing docker-compose app
-      community.docker.docker_compose_v2:
-        project_src: /home/ubuntu
-        state: absent
-      ignore_errors: yes
+    - name: Stop existing container if it exists
+      shell: docker stop runcalc || true
 
-    - name: Prune everything on docker
-      community.docker.docker_prune:
-        containers: true
-        images: true
-        networks: true
-        volumes: true
-        builder_cache: true
+    - name: Remove existing container if it exists
+      shell: docker rm runcalc || true
 
-    - name: Copy docker-compose file from the parent directory
-      copy:
-        src: ../docker-compose-staging.yml
-        dest: /home/ubuntu/docker-compose-staging.yml
-        mode: '0644'
+    - name: Pull selected image tag
+      shell: docker pull {{ image_name }}:{{ image_tag }}
 
-    - name: Copy nginx config file
-      copy:
-        src: ../nginx/
-        dest: /home/ubuntu/nginx/
-        mode: '0644'
-
-    - name: Start docker compose app
-      community.docker.docker_compose_v2:
-        project_src: /home/ubuntu
-        files:
-          - docker-compose-staging.yml
-        state: present
-        build: never
+    - name: Run container on port 80
+      shell: docker run -d --name runcalc -p 80:80 {{ image_name }}:{{ image_tag }}
