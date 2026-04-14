@@ -3,7 +3,7 @@
   connection: local
   vars:
     instance_name: RunCalc_Prod
-    key_name: runcalc_prod_key
+    key_name: DevOpsNew
     instance_type: t2.small
     security_group_id: sg-02fcad291aeb7b8fc
     image_id: ami-0866a3c8686eaeeba
