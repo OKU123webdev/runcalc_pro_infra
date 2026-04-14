@@ -55,7 +55,7 @@ pipeline {
             steps {
                 sh '''
                     echo "Testing deployment via DuckDNS"
-                    for i in {1..12}; do
+                    for i in $(seq 1 12); do
                         if curl --fail --silent http://b01663625-staging.duckdns.org > /dev/null; then
                             echo "Deployment verified successfully."
                             exit 0
